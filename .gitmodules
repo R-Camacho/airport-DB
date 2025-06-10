@@ -1,0 +1,3 @@
+[submodule "bdist-workspace"]
+	path = bdist-workspace
+	url = git@github.com:bdist/bdist-workspace.git
