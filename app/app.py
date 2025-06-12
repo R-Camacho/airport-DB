@@ -69,7 +69,7 @@ def airports():
             try:
                 airports = cur.execute(
                     """
-                    SELECT nome, cidade, codigo 
+                    SELECT nome, cidade
                     FROM aeroporto;
                     """,
                     {},
