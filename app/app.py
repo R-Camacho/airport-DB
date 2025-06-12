@@ -85,7 +85,7 @@ def airports():
 def airport_departures(partida):
     """
     Returns all flights (plane serial number, hour of departure and airport of destination)
-    that departure from <partida> up until after 12h
+    that departure from <partida> up until after 12h.
     """
 
     # TODO: ver o que fazer se o user colocar em letra maiúscula.
@@ -96,7 +96,7 @@ def airport_departures(partida):
     with pool.connection() as conn:
         with conn.cursor() as cur:
             try:
-
+                # Check if airport exists
                 cur.execute(
                     """
                     SELECT *
@@ -105,12 +105,11 @@ def airport_departures(partida):
                     """,
                     {"partida": partida},
                 )
-
                 if not cur.fetchone():
                     # TODO: acho que o erro é 404 (not found)
                     # TODO: confirmar todos os códigos de erro em
                     # https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status
-                    return jsonify({"error:": f"Airport '{partida}' not found"}, 404)
+                    return jsonify({"error:": f"Airport '{partida}' not found"}), 404
 
                 departures = cur.execute(
                     # TODO:ver se é para ordenar o output
@@ -131,6 +130,75 @@ def airport_departures(partida):
                 return jsonify(departures), 200
             except Exception as e:
                 return jsonify({"error:": str(e)}), 400
+
+
+@app.route("/voos/<partida>/<chegada>/", methods=("GET",))
+def available_flights(partida, chegada):
+    """
+    Returns the next 3 flights (plane serial number, hour of departure and airport of destination),
+    between <partida> and <chegada> airports, that have available tickets.
+    """
+
+    # TODO: tratamento de erros
+
+    if partida == chegada:
+        return jsonify({"error": "Departure and arrival airports can't be the same"}), 400
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            try:
+                # Check if departure airport exists
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM aeroporto
+                    WHERE codigo = %(partida)s;
+                    """,
+                    {"partida": partida},
+                )
+                if not cur.fetchone():
+                    # TODO: acho que o erro é 404 (not found)
+                    # TODO: confirmar todos os códigos de erro em
+                    # https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status
+                    return jsonify({"error:": f"Airport '{partida}' not found"}), 404
+
+                # Check if arrivasl airport exists
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM aeroporto
+                    WHERE codigo = %(chegada)s;
+                    """,
+                    {"chegada": chegada},
+                )
+                if not cur.fetchone():
+                    # TODO: acho que o erro é 404 (not found)
+                    # TODO: confirmar todos os códigos de erro em
+                    # https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status
+                    return jsonify({"error:": f"Airport '{chegada}' not found"}), 404
+
+                flights = cur.execute(
+                    """
+                    SELECT DISTINCT v.no_serie, v.hora_partida
+                    FROM voo v
+                    JOIN assento a USING (no_serie)
+                    LEFT JOIN bilhete b ON v.id = b.voo_id AND a.lugar = b.lugar AND a.no_serie = b.no_serie
+                    WHERE v.partida = %(partida)s
+                    AND v.chegada = %(chegada)s
+                    AND v.hora_partida > NOW()
+                    AND b.id IS NULL -- if no matching ticket exists         
+                    LIMIT 3;
+                    """,
+                    {"partida": partida, "chegada": chegada}
+                ).fetchall()
+
+                log.debug(
+                    f"{cur.rowcount} available flights found between {partida.upper()} and {chegada.upper()}")
+
+                return jsonify(flights), 200
+
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
 
 
 if __name__ == "__main__":
