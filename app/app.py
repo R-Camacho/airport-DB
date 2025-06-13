@@ -78,7 +78,7 @@ def airports():
 
                 return jsonify(airports), 200
             except Exception as e:
-                return jsonify({"error:": str(e)}), 400
+                return jsonify({"error:": str(e)}), 500
 
 
 @app.route("/voos/<partida>/", methods=("GET", ))
@@ -109,7 +109,7 @@ def airport_departures(partida):
                     # TODO: acho que o erro é 404 (not found)
                     # TODO: confirmar todos os códigos de erro em
                     # https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status
-                    return jsonify({"error:": f"Airport '{partida}' not found"}), 404
+                    return jsonify({"message": f"Airport '{partida}' not found", "status": "error"}), 404
 
                 departures = cur.execute(
                     # TODO:ver se é para ordenar o output
@@ -129,7 +129,7 @@ def airport_departures(partida):
 
                 return jsonify(departures), 200
             except Exception as e:
-                return jsonify({"error:": str(e)}), 400
+                return jsonify({"error:": str(e)}), 500
 
 
 @app.route("/voos/<partida>/<chegada>/", methods=("GET",))
@@ -142,7 +142,14 @@ def available_flights(partida, chegada):
     # TODO: tratamento de erros
 
     if partida == chegada:
-        return jsonify({"error": "Departure and arrival airports can't be the same"}), 400
+        return jsonify({"message": "Departure and arrival airports can't be the same", "status": "error"}), 400
+
+    if not (
+        len(partida) == 3 and len(chegada) == 3 or
+        partida.isalpha() and chegada.isalpha() or
+        partida.isupper() and chegada.isupper()
+    ):
+        return jsonify({"message": "Airport codes consist of 3 upper case letters", "status": "error"}), 400
 
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -160,7 +167,7 @@ def available_flights(partida, chegada):
                     # TODO: acho que o erro é 404 (not found)
                     # TODO: confirmar todos os códigos de erro em
                     # https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status
-                    return jsonify({"error:": f"Airport '{partida}' not found"}), 404
+                    return jsonify({"message": f"Airport '{partida}' not found", "status": "error"}), 404
 
                 # Check if arrivasl airport exists
                 cur.execute(
@@ -175,7 +182,7 @@ def available_flights(partida, chegada):
                     # TODO: acho que o erro é 404 (not found)
                     # TODO: confirmar todos os códigos de erro em
                     # https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status
-                    return jsonify({"error:": f"Airport '{chegada}' not found"}), 404
+                    return jsonify({"message": f"Airport '{chegada}' not found", "status": "error"}), 404
 
                 flights = cur.execute(
                     """
@@ -187,6 +194,7 @@ def available_flights(partida, chegada):
                     AND v.chegada = %(chegada)s
                     AND v.hora_partida > NOW()
                     AND b.id IS NULL -- if no matching ticket exists         
+                    ORDER BY v.hora_partida
                     LIMIT 3;
                     """,
                     {"partida": partida, "chegada": chegada}
@@ -199,6 +207,101 @@ def available_flights(partida, chegada):
 
             except Exception as e:
                 return jsonify({"error": str(e)}), 400
+
+
+@app.route("/compra/<voo>", methods=("POST",))
+def purchase_ticket(voo):
+    """
+    Purchase tickets for a flight.
+    Query parameters:
+    - nif_cliente: Customer NIF (9 digits)
+    - bilhetes: List of pairs of (passenger_name, class), separated by semicolon, and values separated by comma
+    Example: /compra/123/?nif_cliente=123456789&bilhetes=John Doe,economica;Jane Smith,primeira;Bob Wilson,economica
+    """
+
+    nif_client = request.args.get("nif_cliente")
+    tickets = request.args.get("bilhetes")
+
+    error = None
+
+    if not nif_client:
+        error = "Parameter 'nif_cliente' is necessary."
+    elif len(nif_client) != 9 or not nif_client.isdigit():
+        error = "NIF must have exactly 9 digits."
+
+    if not error and not tickets:
+        error = "Parameter 'bilhetes' is necessary: list of pairs of (passenger_name, class ('economica'| 'primeira'))\nExample: bilhetes=John Doe,economica;Jane Smith,primeira;Bob Wilson,economica"
+
+    if not error:
+        tickets_list = []
+        try:
+            # Separated by semicolon
+            all_tickets = [b.strip() for b in tickets.split(';') if b.strip()]
+
+            if not all_tickets:
+                # TODO: ver tratamento deste erro
+                error = "Parameter 'bilhetes' is necessary: list of pairs of (passenger_name, class ('economica'| 'primeira'))\nExample: bilhetes=John Doe,economica;Jane Smith,primeira;Bob Wilson,economica"
+            else:
+                for i, ticket in enumerate(all_tickets):
+                    values = [p.strip() for p in ticket.split(',')]
+
+                    if len(values) != 2:
+                        error = f"Bilhete {i+1}: Formato deve ser 'Nome,Classe'."
+                        break
+
+                    name, classe = values
+
+                    # Validate passenger name
+                    if len(name) > 80:
+                        error = f"Bilhete {i+1}: Nome do passageiro é muito longo."
+                        break
+
+                    classe = classe.lower()
+                    if classe not in ("economica", "primeira"):
+                        error = f"Bilhete {i+1}: Classe deve ser 'economica' ou 'primeira'."
+                        break
+
+                tickets_list.append({"name": name, "class": classe})
+
+        except Exception:
+            error = "Invalid format of parameter 'bilhetes'. Use: 'Nome1, Classe1; Nome2,Classe2'"
+
+    if error is not None:
+        return jsonify({"message": error, "status": "error"}), 400
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            try:
+                with conn.transaction():
+                    # BEGIN is executed, a transaction started
+
+                    # Check if flight exists and get details
+                    flight = cur.execute(
+                        """
+                        SELECT v.id, v.no_serie, v.hora_partida, v.partida, a.nome as aeroporto_partida
+                        FROM voo v
+                        JOIN aeroporto a ON v.partida = a.codigo
+                        WHERE v.id = %(voo)s AND v.hora_partida > NOW();
+                        """, {"voo_id": voo}
+                    ).fetchone()
+
+                    if not flight:
+                        return jsonify({
+                            "message": f"Voo {voo} não encontrado ou já partiu.",
+                            "status": "error"
+                        }), 404
+
+                    # TODO: Check capacity for each class
+
+
+                    # TODO: Create bilhete
+
+            except Exception as e:
+                pass
+
+            else:
+                pass
+                # COMMIT is executed at the end of the block.
 
 
 if __name__ == "__main__":
