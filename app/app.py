@@ -6,6 +6,7 @@ from logging.config import dictConfig
 from flask import Flask, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import psycopg
 from psycopg.rows import namedtuple_row
 from psycopg_pool import ConnectionPool
 
@@ -32,8 +33,11 @@ dictConfig(
 
 app = Flask(__name__)
 app.config.from_prefixed_env()
+app.json.sort_keys = False # Preserve insertion ordeinsertion orderr
+app.json.ensure_ascii = False
 log = app.logger
 
+# TODO: reformular jsons de saida para terem mais informação, como no /compra endpoint
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://postgres:postgres@postgres/postgres")
@@ -51,13 +55,6 @@ pool = ConnectionPool(
     name="postgres_pool",
     timeout=5,
 )
-
-
-@app.route("/ping", methods=("GET",))
-def ping():
-    log.debug("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!")
-    return jsonify({"message": "pong!"}), 200
-
 
 @app.route("/", methods=("GET", ))
 def airports():
@@ -209,7 +206,7 @@ def available_flights(partida, chegada):
                 return jsonify({"error": str(e)}), 400
 
 
-@app.route("/compra/<voo>", methods=("POST",))
+@app.route("/compra/<voo>/", methods=("POST",))
 def purchase_ticket(voo):
     """
     Purchase tickets for a flight.
@@ -218,7 +215,6 @@ def purchase_ticket(voo):
     - bilhetes: List of pairs of (passenger_name, class), separated by semicolon, and values separated by comma
     Example: /compra/123/?nif_cliente=123456789&bilhetes=John Doe,economica;Jane Smith,primeira;Bob Wilson,economica
     """
-
     nif_client = request.args.get("nif_cliente")
     tickets = request.args.get("bilhetes")
 
@@ -230,17 +226,17 @@ def purchase_ticket(voo):
         error = "NIF must have exactly 9 digits."
 
     if not error and not tickets:
-        error = "Parameter 'bilhetes' is necessary: list of pairs of (passenger_name, class ('economica'| 'primeira'))\nExample: bilhetes=John Doe,economica;Jane Smith,primeira;Bob Wilson,economica"
+        error = "Parameter 'bilhetes' is necessary: list of pairs of (passenger_name, class ('economica'| 'primeira')). Example: bilhetes=John Doe,economica;Jane Smith,primeira;Bob Wilson,economica"
 
+    tickets_list = []
     if not error:
-        tickets_list = []
         try:
             # Separated by semicolon
             all_tickets = [b.strip() for b in tickets.split(';') if b.strip()]
 
             if not all_tickets:
                 # TODO: ver tratamento deste erro
-                error = "Parameter 'bilhetes' is necessary: list of pairs of (passenger_name, class ('economica'| 'primeira'))\nExample: bilhetes=John Doe,economica;Jane Smith,primeira;Bob Wilson,economica"
+                error = "Parâmetro 'bilhetes' é necessário."
             else:
                 for i, ticket in enumerate(all_tickets):
                     values = [p.strip() for p in ticket.split(',')]
@@ -261,10 +257,10 @@ def purchase_ticket(voo):
                         error = f"Bilhete {i+1}: Classe deve ser 'economica' ou 'primeira'."
                         break
 
-                tickets_list.append({"name": name, "class": classe})
+                    tickets_list.append({"name": name, "class": classe})
 
         except Exception:
-            error = "Invalid format of parameter 'bilhetes'. Use: 'Nome1, Classe1; Nome2,Classe2'"
+            error = "Formato inválido do parâmetro 'bilhetes'. Use: 'Nome1, Classe1; Nome2,Classe2'"
 
     if error is not None:
         return jsonify({"message": error, "status": "error"}), 400
@@ -275,13 +271,21 @@ def purchase_ticket(voo):
                 with conn.transaction():
                     # BEGIN is executed, a transaction started
 
+
+                    #all_flights = cur.execute(
+                    #    """
+                    #    SELECT id from voo;
+                    #    """
+                    #).fetchall()
+
+                    #log.info(f"all: {all_flights}")
+
                     # Check if flight exists and get details
                     flight = cur.execute(
                         """
-                        SELECT v.id, v.no_serie, v.hora_partida, v.partida, a.nome as aeroporto_partida
+                        SELECT v.id, v.no_serie, v.hora_partida, v.partida, v.chegada 
                         FROM voo v
-                        JOIN aeroporto a ON v.partida = a.codigo
-                        WHERE v.id = %(voo)s AND v.hora_partida > NOW();
+                        WHERE v.id = %(voo_id)s ;--AND v.hora_partida > NOW();
                         """, {"voo_id": voo}
                     ).fetchone()
 
@@ -293,16 +297,99 @@ def purchase_ticket(voo):
 
                     # TODO: Check capacity for each class
 
+                    log.info(f"flightpartida: {flight.partida}")
 
-                    # TODO: Create bilhete
+                    # Create sale record
+                    venda = cur.execute(
+                        """
+                        INSERT INTO venda (nif_cliente, balcao, hora)
+                        VALUES (%(nif_cliente)s, %(balcao)s, NOW())
+                        RETURNING codigo_reserva;
+                        """,
+                        {"nif_cliente": nif_client, "balcao": flight.partida}
+                    ).fetchone().codigo_reserva
+
+                    log.info(f"venda criada: {venda}") 
+                    
+                    created_tickets = []
+                    i = 0
+                    for ticket in tickets_list:
+
+                        log.info(f"i: {i}")
+                        first_class = ticket["class"] == "primeira"
+
+                        # TODO: confirmar geração do preço aqui
+                        price = 500.0 if first_class else 200.0
+                        
+                        id = cur.execute(
+                            """
+                            INSERT INTO bilhete (voo_id, codigo_reserva, nome_passegeiro, preco, prim_classe)
+                            VALUES (%(voo_id)s, %(codigo_reserva)s, %(nome)s, %(preco)s, %(classe)s)
+                            RETURNING id;
+                            """,
+                            {"voo_id": voo, 
+                             "codigo_reserva": venda, 
+                             "nome": ticket["name"], 
+                             "preco": price, "classe": first_class}
+                        ).fetchone().id
+
+                        log.info(f"tickedid: {id}")
+
+                        ticket_dict = {
+                            "id": id,
+                            "name": ticket["name"],
+                            "classe": ticket["class"],
+                            "preco": float(price)
+                        }
+
+                        log.info(ticket_dict)
+
+                        created_tickets.append(ticket_dict)
+                        
+                    # If we reach here, ALL operations succeeded
+                    # COMMIT happens automatically at the end of the transaction block
+
+            except psycopg.Error as e:
+                log.error(f"Trigger error when inserting ticket: {e}")
+
+                error_str = str(e)
+                n_pos = error_str.find('\n')
+                if n_pos != -1:
+                    error_str = error_str[:n_pos]
+
+                return jsonify({
+                    "status": "error",
+                    "message": "Erro ao processar compra. Nenhuma alteração foi feita.", 
+                    "erro": error_str
+                }), 400
 
             except Exception as e:
-                pass
-
+                # ROLLBACK is automatic
+                log.error(f"Transaction failed: {str(e)}")
+                return jsonify({
+                    "status": "error",
+                    "message": "Erro ao processar compra. Nenhuma alteração foi feita.", 
+                    "erro": str(e)
+                }), 500
             else:
+                # TODO: remove this I think it's useless
                 pass
                 # COMMIT is executed at the end of the block.
 
+    log.debug(f"created_tickets: {created_tickets}")
+    return jsonify({
+        "status": "success",
+        "message": "Compra realizada com sucesso",
+        "codigo_reserva": venda,
+        "voo": {
+            "id": flight.id,
+            "no_serie": flight.no_serie,
+            "hora_partida": flight.hora_partida,
+            "aeroporto_partida": flight.partida,
+            "aeroporto_chegada": flight.chegada
+        },
+        "bilhetes": created_tickets 
+    }), 201
 
 if __name__ == "__main__":
     app.run()
