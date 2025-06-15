@@ -117,23 +117,94 @@ DO $$
 DECLARE
     -- TODO adicionar as outras routes
     routes TEXT[][] := ARRAY[
-        -- From London
-        ARRAY['LHR', 'CDG'], ARRAY['CDG', 'LHR'], -- London-Paris roundtrip
-        ARRAY['LHR', 'FRA'], ARRAY['FRA', 'LHR'], -- London-Frankfurt roundtrip
-        ARRAY['LGW', 'AMS'], ARRAY['AMS', 'LGW'], -- London-Amsterdam roundtrip
-        ARRAY['LGW', 'MAD'], ARRAY['MAD', 'LGW'], -- London-Madrid roundtrip
-        
-        -- From Paris
-        ARRAY['CDG', 'FCO'], ARRAY['FCO', 'CDG'], -- Paris-Rome roundtrip
-        ARRAY['ORY', 'BCN'], ARRAY['BCN', 'ORY'], -- Paris-Barcelona roundtrip
-        
-        -- From Frankfurt
-        ARRAY['FRA', 'IST'], ARRAY['IST', 'FRA'], -- Frankfurt-Istanbul roundtrip
-        ARRAY['FRA', 'ZRH'], ARRAY['ZRH', 'FRA'], -- Frankfurt-Zurich roundtrip
-        
-        -- Other routes
-        ARRAY['AMS', 'CPH'], ARRAY['CPH', 'AMS'], -- Amsterdam-Copenhagen roundtrip
-        ARRAY['MAD', 'LIN'], ARRAY['LIN', 'MAD']  -- Madrid-Milan roundtrip
+        ARRAY['LHR', 'CDG'], ARRAY['CDG', 'LHR'],
+        ARRAY['LHR', 'ORY'], ARRAY['ORY', 'LHR'],
+        ARRAY['LHR', 'FRA'], ARRAY['FRA', 'LHR'],
+        ARRAY['LHR', 'AMS'], ARRAY['AMS', 'LHR'],
+        ARRAY['LHR', 'MAD'], ARRAY['MAD', 'LHR'],
+        ARRAY['LHR', 'BCN'], ARRAY['BCN', 'LHR'],
+        ARRAY['LHR', 'FCO'], ARRAY['FCO', 'LHR'],
+        ARRAY['LHR', 'LIN'], ARRAY['LIN', 'LHR'],
+        ARRAY['LHR', 'IST'], ARRAY['IST', 'LHR'],
+        ARRAY['LHR', 'ZRH'], ARRAY['ZRH', 'LHR'],
+        ARRAY['LHR', 'CPH'], ARRAY['CPH', 'LHR'],
+
+        ARRAY['LGW', 'CDG'], ARRAY['CDG', 'LGW'],
+        ARRAY['LGW', 'ORY'], ARRAY['ORY', 'LGW'],
+        ARRAY['LGW', 'FRA'], ARRAY['FRA', 'LGW'],
+        ARRAY['LGW', 'AMS'], ARRAY['AMS', 'LGW'],
+        ARRAY['LGW', 'MAD'], ARRAY['MAD', 'LGW'],
+        ARRAY['LGW', 'BCN'], ARRAY['BCN', 'LGW'],
+        ARRAY['LGW', 'FCO'], ARRAY['FCO', 'LGW'],
+        ARRAY['LGW', 'LIN'], ARRAY['LIN', 'LGW'],
+        ARRAY['LGW', 'IST'], ARRAY['IST', 'LGW'],
+        ARRAY['LGW', 'ZRH'], ARRAY['ZRH', 'LGW'],
+        ARRAY['LGW', 'CPH'], ARRAY['CPH', 'LGW'],
+
+        ARRAY['CDG', 'FRA'], ARRAY['FRA', 'CDG'],
+        ARRAY['CDG', 'AMS'], ARRAY['AMS', 'CDG'],
+        ARRAY['CDG', 'MAD'], ARRAY['MAD', 'CDG'],
+        ARRAY['CDG', 'BCN'], ARRAY['BCN', 'CDG'],
+        ARRAY['CDG', 'FCO'], ARRAY['FCO', 'CDG'],
+        ARRAY['CDG', 'LIN'], ARRAY['LIN', 'CDG'],
+        ARRAY['CDG', 'IST'], ARRAY['IST', 'CDG'],
+        ARRAY['CDG', 'ZRH'], ARRAY['ZRH', 'CDG'],
+        ARRAY['CDG', 'CPH'], ARRAY['CPH', 'CDG'],
+
+        ARRAY['ORY', 'FRA'], ARRAY['FRA', 'ORY'],
+        ARRAY['ORY', 'AMS'], ARRAY['AMS', 'ORY'],
+        ARRAY['ORY', 'MAD'], ARRAY['MAD', 'ORY'],
+        ARRAY['ORY', 'BCN'], ARRAY['BCN', 'ORY'],
+        ARRAY['ORY', 'FCO'], ARRAY['FCO', 'ORY'],
+        ARRAY['ORY', 'LIN'], ARRAY['LIN', 'ORY'],
+        ARRAY['ORY', 'IST'], ARRAY['IST', 'ORY'],
+        ARRAY['ORY', 'ZRH'], ARRAY['ZRH', 'ORY'],
+        ARRAY['ORY', 'CPH'], ARRAY['CPH', 'ORY'],
+
+        ARRAY['FRA', 'AMS'], ARRAY['AMS', 'FRA'],
+        ARRAY['FRA', 'MAD'], ARRAY['MAD', 'FRA'],
+        ARRAY['FRA', 'BCN'], ARRAY['BCN', 'FRA'],
+        ARRAY['FRA', 'FCO'], ARRAY['FCO', 'FRA'],
+        ARRAY['FRA', 'LIN'], ARRAY['LIN', 'FRA'],
+        ARRAY['FRA', 'IST'], ARRAY['IST', 'FRA'],
+        ARRAY['FRA', 'ZRH'], ARRAY['ZRH', 'FRA'],
+        ARRAY['FRA', 'CPH'], ARRAY['CPH', 'FRA'],
+
+        ARRAY['AMS', 'MAD'], ARRAY['MAD', 'AMS'],
+        ARRAY['AMS', 'BCN'], ARRAY['BCN', 'AMS'],
+        ARRAY['AMS', 'FCO'], ARRAY['FCO', 'AMS'],
+        ARRAY['AMS', 'LIN'], ARRAY['LIN', 'AMS'],
+        ARRAY['AMS', 'IST'], ARRAY['IST', 'AMS'],
+        ARRAY['AMS', 'ZRH'], ARRAY['ZRH', 'AMS'],
+        ARRAY['AMS', 'CPH'], ARRAY['CPH', 'AMS'],
+
+        ARRAY['MAD', 'BCN'], ARRAY['BCN', 'MAD'],
+        ARRAY['MAD', 'FCO'], ARRAY['FCO', 'MAD'],
+        ARRAY['MAD', 'LIN'], ARRAY['LIN', 'MAD'],
+        ARRAY['MAD', 'IST'], ARRAY['IST', 'MAD'],
+        ARRAY['MAD', 'ZRH'], ARRAY['ZRH', 'MAD'],
+        ARRAY['MAD', 'CPH'], ARRAY['CPH', 'MAD'],
+
+        ARRAY['BCN', 'FCO'], ARRAY['FCO', 'BCN'],
+        ARRAY['BCN', 'LIN'], ARRAY['LIN', 'BCN'],
+        ARRAY['BCN', 'IST'], ARRAY['IST', 'BCN'],
+        ARRAY['BCN', 'ZRH'], ARRAY['ZRH', 'BCN'],
+        ARRAY['BCN', 'CPH'], ARRAY['CPH', 'BCN'],
+
+        ARRAY['FCO', 'LIN'], ARRAY['LIN', 'FCO'],
+        ARRAY['FCO', 'IST'], ARRAY['IST', 'FCO'],
+        ARRAY['FCO', 'ZRH'], ARRAY['ZRH', 'FCO'],
+        ARRAY['FCO', 'CPH'], ARRAY['CPH', 'FCO'],
+
+        ARRAY['LIN', 'IST'], ARRAY['IST', 'LIN'],
+        ARRAY['LIN', 'ZRH'], ARRAY['ZRH', 'LIN'],
+        ARRAY['LIN', 'CPH'], ARRAY['CPH', 'LIN'],
+
+        ARRAY['IST', 'ZRH'], ARRAY['ZRH', 'IST'],
+        ARRAY['IST', 'CPH'], ARRAY['CPH', 'IST'],
+
+        ARRAY['ZRH', 'CPH'], ARRAY['CPH', 'ZRH']
+
     ];
     
     flight_date DATE;
