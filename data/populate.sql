@@ -1,4 +1,11 @@
 -- Aeroportos (Airports)
+TRUNCATE TABLE bilhete CASCADE;
+TRUNCATE TABLE venda CASCADE;
+TRUNCATE TABLE assento CASCADE;
+TRUNCATE TABLE voo CASCADE;
+TRUNCATE TABLE aviao CASCADE;
+TRUNCATE TABLE aeroporto CASCADE;
+
 INSERT INTO aeroporto (codigo, nome, cidade, pais) VALUES
 -- London (2 airports)
 ('LHR', 'Heathrow Airport', 'London', 'United Kingdom'),
@@ -243,7 +250,7 @@ BEGIN
         economy_price := 100 + (random() * 400)::NUMERIC(7,2);
         
         -- Generate sales for this flight (between 10 and 50 sales per flight)
-        FOR i IN 1..(10 + floor(random() * 40)::INT LOOP
+        FOR i IN 1..(10 + floor(random() * 40))::INT LOOP
             sale_count := sale_count + 1;
             sale_time := (SELECT hora_partida FROM voo WHERE id = flight_record.id) - 
                          (1 + random() * 30) * INTERVAL '1 day';
@@ -276,10 +283,14 @@ BEGIN
                     ) VALUES (
                         flight_record.id, sale_id, passenger_names[passenger_index], 
                         first_class_price, TRUE, first_class_seats[1], flight_record.no_serie
-                    );
+                    )
+                    ON CONFLICT (voo_id, codigo_reserva, nome_passegeiro) DO NOTHING; -- Add this line
                     
-                    -- Remove used seat
-                    first_class_seats := first_class_seats[2:array_length(first_class_seats, 1)];
+                    -- Remove used seat only if insert was successful (more robust, but complex here, for now, keep as is or check affected rows)
+                    IF FOUND THEN -- Check if the INSERT actually happened
+                        first_class_seats := first_class_seats[2:array_length(first_class_seats, 1)];
+                END IF;
+
                 ELSIF array_length(economy_seats, 1) > 0 THEN
                     -- Economy ticket
                     INSERT INTO bilhete (
@@ -287,19 +298,27 @@ BEGIN
                     ) VALUES (
                         flight_record.id, sale_id, passenger_names[passenger_index], 
                         economy_price, FALSE, economy_seats[1], flight_record.no_serie
-                    );
+                    )
+                    ON CONFLICT (voo_id, codigo_reserva, nome_passegeiro) DO NOTHING; -- Add this line
                     
-                    -- Remove used seat
-                    economy_seats := economy_seats[2:array_length(economy_seats, 1)];
+                    IF FOUND THEN -- Check if the INSERT actually happened
+                        economy_seats := economy_seats[2:array_length(economy_seats, 1)];
+                    END IF;
                 END IF;
             END LOOP;
             
             -- Exit if we've reached our targets
-            EXIT WHEN sale_count >= 10000 AND ticket_count >= 30000;
+            IF sale_count >= 10000 AND ticket_count >= 30000 THEN -- Ensure this condition is what you intend
+                RAISE NOTICE 'Target sale/ticket count reached. Exiting population script.';
+                RETURN; -- This will exit the entire DO block
+            END IF;
         END LOOP;
         
         -- Exit if we've reached our targets
-        EXIT WHEN sale_count >= 10000 AND ticket_count >= 30000;
+        IF sale_count >= 10000 AND ticket_count >= 30000 THEN -- Ensure this condition is what you intend
+            RAISE NOTICE 'Target sale/ticket count reached. Exiting population script.';
+            RETURN; -- This will exit the entire DO block
+        END IF;
     END LOOP;
     
     RAISE NOTICE 'Created % sales with % tickets', sale_count, ticket_count;
