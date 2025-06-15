@@ -234,7 +234,7 @@ BEGIN
         '2025-01-01'::DATE, '2025-07-31'::DATE, '1 day'::INTERVAL
     ) LOOP
         -- Generate 5 flights per day (more on busy days)
-        FOR i IN 1..5 + (CASE WHEN EXTRACT(DOW FROM flight_date) IN (0,6) THEN 3 ELSE 0 END) LOOP
+        FOR i IN 1..5 LOOP
             -- Select a random route
             route_index := 1 + floor(random() * array_length(routes, 1))::INT;
             
@@ -316,7 +316,7 @@ BEGIN
             ORDER BY random()
         );
         
-        -- Set prices based on flight distance (simplified)
+        -- Set prices (simplified)
         first_class_price := 500 + (random() * 1000)::NUMERIC(7,2);
         economy_price := 100 + (random() * 400)::NUMERIC(7,2);
         
@@ -342,7 +342,6 @@ BEGIN
                 
                 -- Decide if first class or economy (10% chance for first class)
                 is_first_class := (random() < 0.1);
-                
                 -- Select a passenger name
                 passenger_index := 1 + floor(random() * array_length(passenger_names, 1))::INT;
                 
