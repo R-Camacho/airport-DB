@@ -212,9 +212,19 @@ DECLARE
     arrival_time TIMESTAMP;
     flight_duration INTERVAL;
     plane_index INT;
+    airports TEXT[] := ARRAY(SELECT codigo FROM aeroporto ORDER BY codigo);
     plane_no VARCHAR;
     flight_id INT;
     route_index INT;
+    airport_index INT;
+    departure_airport TEXT;
+    arrival_airport TEXT;
+    outbound_plane VARCHAR;
+    return_plane VARCHAR;
+    city_check INT;
+    turnaround_time INTERVAL;
+    return_departure_time TIMESTAMP;
+    return_arrival_time TIMESTAMP;
     plane_assignment JSONB := '{}'::JSONB;
     current_location JSONB := '{}'::JSONB;
     
@@ -223,53 +233,96 @@ DECLARE
         SELECT no_serie FROM aviao ORDER BY no_serie
     );
 BEGIN
-    -- Initialize current location for each plane (start at random airports)
+    -- Initialize current location for each plane (distribute evenly across airports)
     FOR i IN 1..array_length(planes, 1) LOOP
+        airport_index := ((i - 1) % array_length(airports, 1)) + 1;
         current_location := jsonb_set(current_location, ARRAY[planes[i]], 
-            to_jsonb((SELECT codigo FROM aeroporto ORDER BY random() LIMIT 1)));
+            to_jsonb(airports[airport_index]));
     END LOOP;
     
     -- Generate flights for each day from Jan 1 to Jul 31, 2025
     FOR flight_date IN SELECT generate_series(
         '2025-01-01'::DATE, '2025-07-31'::DATE, '1 day'::INTERVAL
     ) LOOP
-        -- Generate 5 flights per day (more on busy days)
+        -- Generate 5 outbound flights per day (each will have a return flight with different plane)
         FOR i IN 1..5 LOOP
-            -- Select a random route
-            route_index := 1 + floor(random() * array_length(routes, 1))::INT;
-            
-            -- Assign a plane that's currently at the departure airport
-            plane_no := NULL;
-            FOR j IN 1..array_length(planes, 1) LOOP
-                IF (current_location->>planes[j]) = routes[route_index][1] THEN
-                    plane_no := planes[j];
+            -- Select a random route ensuring different cities
+            LOOP
+                route_index := 1 + floor(random() * array_length(routes, 1))::INT;
+                departure_airport := routes[route_index][1];
+                arrival_airport := routes[route_index][2];
+                
+                -- Check if departure and arrival are in different cities
+                SELECT COUNT(*) INTO city_check
+                FROM aeroporto a1, aeroporto a2
+                WHERE a1.codigo = departure_airport 
+                  AND a2.codigo = arrival_airport 
+                  AND a1.cidade != a2.cidade;
+                
+                -- Exit loop if cities are different
+                IF city_check > 0 THEN
                     EXIT;
                 END IF;
             END LOOP;
             
-            -- If no plane at departure airport, pick any plane (shouldn't happen with our data)
-            IF plane_no IS NULL THEN
-                plane_no := planes[1 + floor(random() * array_length(planes, 1))::INT];
+            -- Find a plane that's currently at the departure airport for OUTBOUND flight
+            outbound_plane := NULL;
+            FOR j IN 1..array_length(planes, 1) LOOP
+                IF (current_location->>planes[j]) = departure_airport THEN
+                    outbound_plane := planes[j];
+                    EXIT;
+                END IF;
+            END LOOP;
+            
+            -- If no plane at departure airport, skip this flight
+            IF outbound_plane IS NULL THEN
+                CONTINUE;
             END IF;
             
-            -- Calculate flight times (random between 1-5 hours)
-            flight_duration := (1 + random() * 4) * INTERVAL '1 hour';
-            departure_time := flight_date + (8 + random() * 10) * INTERVAL '1 hour';
+            -- Find a different plane at the arrival airport for RETURN flight
+            return_plane := NULL;
+            FOR j IN 1..array_length(planes, 1) LOOP
+                IF (current_location->>planes[j]) = arrival_airport AND planes[j] != outbound_plane THEN
+                    return_plane := planes[j];
+                    EXIT;
+                END IF;
+            END LOOP;
+            
+            -- If no different plane at arrival airport, skip this flight pair
+            IF return_plane IS NULL THEN
+                CONTINUE;
+            END IF;
+            
+            -- Calculate flight times
+            flight_duration := (1 + random() * 2) * INTERVAL '1 hour';
+            departure_time := flight_date + (8 + random() * 6) * INTERVAL '1 hour'; -- 8AM-2PM
             arrival_time := departure_time + flight_duration;
             
-            -- Insert the flight
+            -- Insert the OUTBOUND flight
             INSERT INTO voo (no_serie, hora_partida, hora_chegada, partida, chegada)
-            VALUES (plane_no, departure_time, arrival_time, routes[route_index][1], routes[route_index][2])
+            VALUES (outbound_plane, departure_time, arrival_time, departure_airport, arrival_airport)
             RETURNING id INTO flight_id;
             
-            -- Update plane's current location
-            current_location := jsonb_set(current_location, ARRAY[plane_no], 
-                to_jsonb(routes[route_index][2]));
+            -- Calculate return flight times (1-3 hours later for quick turnaround)
+            turnaround_time := (1 + random() * 2) * INTERVAL '1 hour';
+            return_departure_time := arrival_time + turnaround_time;
+            return_arrival_time := return_departure_time + flight_duration;
+            
+            -- Insert the RETURN flight (different plane)
+            INSERT INTO voo (no_serie, hora_partida, hora_chegada, partida, chegada)
+            VALUES (return_plane, return_departure_time, return_arrival_time, arrival_airport, departure_airport)
+            RETURNING id INTO flight_id;
+            
+            -- Update both planes' locations (they swap locations)
+            current_location := jsonb_set(current_location, ARRAY[outbound_plane], 
+                to_jsonb(arrival_airport));
+            current_location := jsonb_set(current_location, ARRAY[return_plane], 
+                to_jsonb(departure_airport));
+                
         END LOOP;
     END LOOP;
 END $$;
 
--- Vendas (Sales) and Bilhetes (Tickets) - generating 10,000+ sales with 30,000+ tickets
 DO $$
 DECLARE
     sale_id INT;
@@ -289,6 +342,14 @@ DECLARE
     seats_available INT;
     tickets_per_sale INT;
     sale_time TIMESTAMP;
+    target_first_class INT;
+    target_economy INT;
+    total_target_passengers INT;
+    capacity NUMERIC;
+    passengers_booked INT ;
+    remaining_passengers INT;
+    
+    
 BEGIN
     -- For each flight, generate sales and tickets
     FOR flight_record IN SELECT id, no_serie FROM voo ORDER BY random() LOOP
@@ -304,16 +365,28 @@ BEGIN
             WHERE no_serie = flight_record.no_serie AND prim_classe = FALSE
             ORDER BY random()
         );
+
+        -- Random capacity between 0.9 and 0.99
+        capacity := random() * 0.09 + 0.9;
+        target_first_class := CEIL(array_length(first_class_seats, 1) * capacity)::INT;
+        target_economy := CEIL(array_length(economy_seats, 1) * capacity)::INT;
+        total_target_passengers := target_first_class + target_economy;
+
+        IF total_target_passengers = 0 THEN
+            CONTINUE;
+        END IF;
         
         -- Set prices (simplified)
         first_class_price := 500 + (random() * 1000)::NUMERIC(7,2);
         economy_price := 100 + (random() * 400)::NUMERIC(7,2);
         
         -- Generate sales for this flight (between 10 and 50 sales per flight)
-        FOR i IN 1..(10 + floor(random() * 40))::INT LOOP
+        passengers_booked := 0;
+    
+        WHILE passengers_booked < total_target_passengers LOOP
             sale_count := sale_count + 1;
             sale_time := (SELECT hora_partida FROM voo WHERE id = flight_record.id) - 
-                         (1 + random() * 30) * INTERVAL '1 day';
+                        (1 + random() * 30) * INTERVAL '1 day';
             
             -- Create sale
             INSERT INTO venda (nif_cliente, balcao, hora)
@@ -324,14 +397,23 @@ BEGIN
             )
             RETURNING codigo_reserva INTO sale_id;
             
-            -- Generate tickets for this sale (1-5 tickets per sale)
-            tickets_per_sale := 1 + floor(random() * 4)::INT;
+            
+            tickets_per_sale := LEAST(1 + floor(random() * 3)::INT, remaining_passengers);
             FOR j IN 1..tickets_per_sale LOOP
-                ticket_count := ticket_count + 1;
                 
                 -- Decide if first class or economy (10% chance for first class)
-                is_first_class := (random() < 0.1);
-                
+                passengers_booked := passengers_booked + 1;
+                -- Decide class based on remaining capacity and availability
+                -- Prioritize filling first class to 90% first, then economy
+                IF target_first_class > 0 AND array_length(first_class_seats, 1) > 0 THEN
+                    is_first_class := TRUE;
+                    target_first_class := target_first_class - 1;
+
+                ELSIF target_economy > 0 AND array_length(economy_seats, 1) > 0 THEN
+                    is_first_class := FALSE;
+                    target_economy := target_economy - 1;
+
+                END IF;
                 -- Insert ticket
                 IF is_first_class AND array_length(first_class_seats, 1) > 0 THEN
                     -- First class ticket
@@ -345,9 +427,8 @@ BEGIN
  
                     IF FOUND THEN -- Check if the INSERT actually happened
                         first_class_seats := first_class_seats[2:array_length(first_class_seats, 1)];
-      
-
-                END IF;
+                        ticket_count := ticket_count + 1;
+                    END IF;
 
                 ELSIF array_length(economy_seats, 1) > 0 THEN
                     -- Economy ticket
@@ -361,22 +442,16 @@ BEGIN
   
                     IF FOUND THEN -- Check if the INSERT actually happened
                         economy_seats := economy_seats[2:array_length(economy_seats, 1)];
+                        ticket_count := ticket_count + 1;
                     END IF;
                 END IF;
             END LOOP;
             
-            -- Exit if we've reached our targets
-            IF sale_count >= 10000 AND ticket_count >= 30000 THEN -- Ensure this condition is what you intend
-                RAISE NOTICE 'Target sale/ticket count reached. Exiting population script.';
-                RETURN; -- This will exit the entire DO block
+            IF passengers_booked >= total_target_passengers THEN
+                EXIT;
             END IF;
         END LOOP;
         
-        -- Exit if we've reached our targets
-        IF sale_count >= 10000 AND ticket_count >= 30000 THEN -- Ensure this condition is what you intend
-            RAISE NOTICE 'Target sale/ticket count reached. Exiting population script.';
-            RETURN; -- This will exit the entire DO block
-        END IF;
     END LOOP;
     
     RAISE NOTICE 'Created % sales with % tickets', sale_count, ticket_count;
