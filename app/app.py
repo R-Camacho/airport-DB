@@ -495,7 +495,7 @@ def checkin_ticket(bilhete):
         "passageiro": ticket.nome_passegeiro,
         "assento": available_seat.lugar,
         "classe": "primeira classe" if ticket.prim_classe else "classe económica"
-    }), 200
+    }), 201
 
 
 if __name__ == "__main__":
