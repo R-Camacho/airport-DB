@@ -282,17 +282,6 @@ DECLARE
     seat_record RECORD;
     first_class_seats TEXT[];
     economy_seats TEXT[];
-    -- TODO talvez adicionar mais nomes, doutro ficheiro provavel
-    passenger_names TEXT[] := ARRAY[
-        'James Smith', 'Maria Garcia', 'John Johnson', 'Anna Müller', 'Robert Wilson',
-        'Sophia Rodriguez', 'Michael Brown', 'Emma Davis', 'David Martinez', 'Olivia Taylor',
-        'Daniel Anderson', 'Isabella Thomas', 'Matthew Hernandez', 'Charlotte Moore',
-        'Christopher Martin', 'Amelia Jackson', 'Andrew Thompson', 'Mia White', 'Joshua Lopez',
-        'Harper Lee', 'Joseph Perez', 'Evelyn Harris', 'William Clark', 'Abigail Lewis',
-        'Alexander Robinson', 'Emily Walker', 'Ryan Hall', 'Elizabeth Young', 'Nicholas Allen',
-        'Sofia King'
-    ];
-    passenger_index INT;
     ticket_price NUMERIC;
     first_class_price NUMERIC;
     economy_price NUMERIC;
@@ -342,8 +331,6 @@ BEGIN
                 
                 -- Decide if first class or economy (10% chance for first class)
                 is_first_class := (random() < 0.1);
-                -- Select a passenger name
-                passenger_index := 1 + floor(random() * array_length(passenger_names, 1))::INT;
                 
                 -- Insert ticket
                 IF is_first_class AND array_length(first_class_seats, 1) > 0 THEN
@@ -351,14 +338,15 @@ BEGIN
                     INSERT INTO bilhete (
                         voo_id, codigo_reserva, nome_passegeiro, preco, prim_classe, lugar, no_serie
                     ) VALUES (
-                        flight_record.id, sale_id, passenger_names[passenger_index], 
+                        flight_record.id, sale_id, 'passegeiro_' || currval('bilhete_id_seq'::regclass) + 1, 
                         first_class_price, TRUE, first_class_seats[1], flight_record.no_serie
                     )
                     ON CONFLICT (voo_id, codigo_reserva, nome_passegeiro) DO NOTHING; -- Add this line
-                    
-                    -- Remove used seat only if insert was successful (more robust, but complex here, for now, keep as is or check affected rows)
+ 
                     IF FOUND THEN -- Check if the INSERT actually happened
                         first_class_seats := first_class_seats[2:array_length(first_class_seats, 1)];
+      
+
                 END IF;
 
                 ELSIF array_length(economy_seats, 1) > 0 THEN
@@ -366,11 +354,11 @@ BEGIN
                     INSERT INTO bilhete (
                         voo_id, codigo_reserva, nome_passegeiro, preco, prim_classe, lugar, no_serie
                     ) VALUES (
-                        flight_record.id, sale_id, passenger_names[passenger_index], 
+                        flight_record.id, sale_id, 'passegeiro_' || currval('bilhete_id_seq'::regclass) + 1, 
                         economy_price, FALSE, economy_seats[1], flight_record.no_serie
                     )
                     ON CONFLICT (voo_id, codigo_reserva, nome_passegeiro) DO NOTHING; -- Add this line
-                    
+  
                     IF FOUND THEN -- Check if the INSERT actually happened
                         economy_seats := economy_seats[2:array_length(economy_seats, 1)];
                     END IF;
