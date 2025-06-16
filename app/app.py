@@ -286,14 +286,6 @@ def purchase_ticket(voo):
                 with conn.transaction():
                     # BEGIN is executed, a transaction started
 
-                    # all_flights = cur.execute(
-                    #    """
-                    #    SELECT id from voo;
-                    #    """
-                    # ).fetchall()
-
-                    # log.info(f"all: {all_flights}")
-
                     # Check if flight exists and get details
                     flight = cur.execute(
                         """
